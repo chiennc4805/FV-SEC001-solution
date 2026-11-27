@@ -1,23 +1,22 @@
 package main
 
 import (
-	"bufio"
 	"cmp"
 	"encoding/csv"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path"
 	"slices"
 	"strconv"
-	s "strings"
 	"sync"
 	"time"
 )
 
 const numWorkers = 5
 
-var jobsCh = make(chan string, numWorkers*1000)
+var jobsCh = make(chan []string, numWorkers*1000)
 var resultsCh = make(chan map[string]*campaignStats, numWorkers)
 
 type campaign struct {
@@ -52,28 +51,28 @@ func readFile(inputPath string) {
 	}
 	defer f.Close()
 
-	scanner := bufio.NewScanner(f)
+	reader := csv.NewReader(f)
+	if _, err := reader.Read(); err != nil {
+		return
+	}
 
-	if !scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			return
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
 		}
-		return
-	}
-
-	for scanner.Scan() {
-		line := scanner.Text()
-		jobsCh <- line
-		// fmt.Println(line)
-	}
-
-	if err := scanner.Err(); err != nil {
-		return
+		if err != nil {
+			continue
+		}
+		jobsCh <- record
+		// fmt.Println(record)
 	}
 }
 
-func parseObject(line string) (campaign, bool) {
-	parts := s.Split(line, ",")
+func parseObject(parts []string) (campaign, bool) {
+	if len(parts) != 6 {
+		return campaign{}, false
+	}
 	campaign_id := parts[0]
 	date := parts[1]
 
@@ -110,10 +109,10 @@ func parseObject(line string) (campaign, bool) {
 func handle() {
 	statsMap := make(map[string]*campaignStats)
 
-	for line := range jobsCh {
-		campaign, ok := parseObject(line)
+	for record := range jobsCh {
+		campaign, ok := parseObject(record)
 		if !ok {
-			return
+			continue
 		}
 
 		// fmt.Println(campaign)
